@@ -1,13 +1,3 @@
----
-title: Demand Forecast Adjuster
-emoji: "\U0001f4ca"
-colorFrom: blue
-colorTo: green
-sdk: docker
-app_port: 8000
-tags:
-  - openenv
----
 
 # Demand Forecast Adjuster
 
@@ -198,6 +188,3 @@ Model: meta-llama/Llama-3.1-8B-Instruct via HuggingFace Inference API (5 episode
 - **Agent Evaluation**: Benchmark how well different LLMs handle numerical reasoning with real-world context
 - **Supply Chain AI Research**: Study how LLMs reason about competing market signals
 
-## License
-
-MIT
