@@ -4,13 +4,14 @@ type: space
 runtime: fastapi
 app: server.app:app
 port: 8000
+
 tasks:
-  - id: easy
-    description: "Adjust demand forecast with 1 clear signal"
+  - name: easy
+    description: Single signal forecast adjustment
     difficulty: easy
-  - id: medium
-    description: "Adjust demand forecast with 2-3 signals in same direction"
+  - name: medium
+    description: Multi-signal same-direction forecast adjustment
     difficulty: medium
-  - id: hard
-    description: "Adjust demand forecast with 4-5 conflicting signals"
+  - name: hard
+    description: Conflicting multi-signal forecast adjustment
     difficulty: hard
