@@ -196,6 +196,7 @@ def grade_forecast(
         4,
     )
 
+    reward = max(0.0001, min(0.9999, reward))
     return {
         "expected_forecast": expected,
         "direction_score": d_score,
