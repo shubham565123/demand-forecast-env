@@ -190,7 +190,7 @@ def main() -> None:
             all_results.append(result)
             task_rewards.append(result["reward"])
 
-            print(f"[STEP] {diff} episode {ep+1}")
+            print(f"[STEP] {difficulty} episode {ep+1}")
             print(
                 f"  Episode {ep+1}: "
                 f"product={result['product']}, "
