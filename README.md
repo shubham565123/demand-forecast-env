@@ -9,7 +9,6 @@ Demand forecasting drives billions in inventory, production, and supply chain de
 
 This environment teaches LLMs to perform that adjustment task, bridging the gap between statistical forecasting and human judgment.
 
-**No supply chain or S&OP environment currently exists in the OpenEnv Hub — this is a novel domain.**
 
 ## How It Works
 
