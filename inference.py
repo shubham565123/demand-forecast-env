@@ -205,6 +205,7 @@ def main() -> None:
 
         avg_reward = sum(task_rewards) / len(task_rewards)
         print(f"  Average reward ({difficulty}): {avg_reward:.4f}")
+        print(f"[TASK] task={difficulty} score={avg_reward:.4f}")
         print()
 
     # Summary
