@@ -17,22 +17,28 @@ import json
 import os
 import re
 import textwrap
-from typing import Optional
+from typing import List, Optional
 
 from openai import OpenAI
 
-# ── Environment imports ──────────────────────────────────────────────────────
 from server.environment import DemandForecastEnvironment
 from models import ForecastAction
 
-# ── Configuration from environment variables ─────────────────────────────────
+# ── Configuration ────────────────────────────────────────────────────────────
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-HF_TOKEN = os.getenv("HF_TOKEN")
 MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 TEMPERATURE = 0.2
 MAX_TOKENS = 300
-EPISODES_PER_TASK = 5  # Number of episodes per difficulty level
+EPISODES_PER_TASK = 5
+
+TASK_IDS = ["task_easy", "task_medium", "task_hard"]
+TASK_DIFFICULTY = {
+    "task_easy": "easy",
+    "task_medium": "medium",
+    "task_hard": "hard",
+}
 
 SYSTEM_PROMPT = textwrap.dedent("""
     You are an expert demand planning analyst. You will receive a product's
@@ -52,8 +58,43 @@ SYSTEM_PROMPT = textwrap.dedent("""
 """).strip()
 
 
+# ── Structured logging (matches validator format exactly) ────────────────────
+
+def emit_log_line(prefix: str, fields: list) -> None:
+    payload = " ".join(f"{key}={value}" for key, value in fields)
+    print(f"{prefix} {payload}", flush=True)
+
+
+def log_start(task: str, env: str, model: str) -> None:
+    emit_log_line("[START]", [
+        ("task", task),
+        ("env", env),
+        ("model", model),
+    ])
+
+
+def log_step(step: int, action: str, reward: float, done: bool) -> None:
+    emit_log_line("[STEP]", [
+        ("step", str(step)),
+        ("action", action),
+        ("reward", f"{reward:.2f}"),
+        ("done", str(done).lower()),
+    ])
+
+
+def log_end(success: bool, steps: int, score: float, rewards: list) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    emit_log_line("[END]", [
+        ("success", str(success).lower()),
+        ("steps", str(steps)),
+        ("score", f"{score:.3f}"),
+        ("rewards", rewards_str),
+    ])
+
+
+# ── Prompt building ─────────────────────────────────────────────────────────
+
 def build_user_prompt(observation) -> str:
-    """Build the user prompt from the environment observation."""
     signals_text = ""
     if observation.signals:
         for i, s in enumerate(observation.signals, 1):
@@ -75,15 +116,9 @@ def build_user_prompt(observation) -> str:
 
 
 def parse_forecast(response_text: str, baseline: float) -> float:
-    """
-    Parse the LLM's response to extract the adjusted forecast.
-
-    Falls back to baseline if parsing fails.
-    """
     if not response_text:
         return baseline
 
-    # Try to parse JSON directly
     try:
         data = json.loads(response_text.strip())
         if "adjusted_forecast" in data:
@@ -93,7 +128,6 @@ def parse_forecast(response_text: str, baseline: float) -> float:
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
 
-    # Try to find JSON in the response
     json_match = re.search(r'\{[^}]*"adjusted_forecast"\s*:\s*([\d.]+)[^}]*\}', response_text)
     if json_match:
         try:
@@ -103,12 +137,10 @@ def parse_forecast(response_text: str, baseline: float) -> float:
         except ValueError:
             pass
 
-    # Try to find any number that looks like a forecast
     numbers = re.findall(r'[\d,]+\.?\d*', response_text)
     for num_str in numbers:
         try:
             val = float(num_str.replace(",", ""))
-            # Only accept values in a reasonable range relative to baseline
             if baseline * 0.3 < val < baseline * 5:
                 return val
         except ValueError:
@@ -117,111 +149,99 @@ def parse_forecast(response_text: str, baseline: float) -> float:
     return baseline
 
 
-def run_episode(
+# ── Run one task (one [START]...[END] block per task) ────────────────────────
+
+def run_task(
     client: OpenAI,
     env: DemandForecastEnvironment,
-    difficulty: str,
-    seed: int,
+    task_id: str,
 ) -> dict:
-    """Run a single episode and return the results."""
-    observation = env.reset(difficulty=difficulty, seed=seed)
+    difficulty = TASK_DIFFICULTY[task_id]
+    rewards: List[float] = []
+    score = 0.0
+    success = False
 
-    user_prompt = build_user_prompt(observation)
-
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt},
-    ]
+    log_start(
+        task=task_id,
+        env="demand_forecast",
+        model=MODEL_NAME,
+    )
 
     try:
-        completion = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=messages,
-            temperature=TEMPERATURE,
-            max_tokens=MAX_TOKENS,
-            stream=False,
-        )
-        response_text = completion.choices[0].message.content or ""
-    except Exception as exc:
-        print(f"  Model request failed ({exc}). Using baseline as fallback.")
-        response_text = ""
+        for ep in range(EPISODES_PER_TASK):
+            seed = 100 + ep
+            observation = env.reset(difficulty=difficulty, seed=seed)
 
-    adjusted_forecast = parse_forecast(response_text, observation.baseline_forecast)
-    action = ForecastAction(adjusted_forecast=adjusted_forecast)
-    result = env.step(action)
+            user_prompt = build_user_prompt(observation)
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ]
+
+            try:
+                completion = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=messages,
+                    temperature=TEMPERATURE,
+                    max_tokens=MAX_TOKENS,
+                    stream=False,
+                )
+                response_text = completion.choices[0].message.content or ""
+            except Exception as exc:
+                print(f"  Model request failed ({exc}). Using baseline as fallback.", flush=True)
+                response_text = ""
+
+            adjusted_forecast = parse_forecast(response_text, observation.baseline_forecast)
+            action = ForecastAction(adjusted_forecast=adjusted_forecast)
+            result = env.step(action)
+
+            reward = result.reward
+            rewards.append(reward)
+
+            log_step(
+                step=ep + 1,
+                action=json.dumps({"adjusted_forecast": adjusted_forecast}),
+                reward=reward,
+                done=True,
+            )
+
+        score = sum(rewards) / len(rewards) if rewards else 0.0
+        # Clamp score to strictly (0, 1)
+        score = max(0.001, min(0.999, score))
+        success = score > 0.5
+
+    except Exception as exc:
+        print(f"  Task {task_id} failed: {exc}", flush=True)
+    finally:
+        log_end(success=success, steps=len(rewards), score=score, rewards=rewards)
 
     return {
-        "difficulty": difficulty,
-        "seed": seed,
-        "product": observation.product_name,
-        "baseline": observation.baseline_forecast,
-        "predicted": adjusted_forecast,
-        "expected": result.expected_forecast,
-        "reward": result.reward,
-        "direction_score": result.direction_score,
-        "magnitude_score": result.magnitude_score,
-        "coverage_score": result.coverage_score,
+        "task_id": task_id,
+        "score": score,
+        "success": success,
     }
 
 
-def main() -> None:
-    """Run baseline inference across all three difficulty levels."""
-    print("[START]")
-    print("=" * 60)
-    print("Demand Forecast Adjuster — Baseline Inference")
-    print("=" * 60)
-    print(f"API Base URL: {API_BASE_URL}")
-    print(f"Model: {MODEL_NAME}")
-    print(f"Episodes per difficulty: {EPISODES_PER_TASK}")
-    print()
+# ── Main ─────────────────────────────────────────────────────────────────────
 
+def main() -> None:
     client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
     env = DemandForecastEnvironment()
 
-    all_results = []
+    results = []
+    for task_id in TASK_IDS:
+        result = run_task(client, env, task_id)
+        results.append(result)
 
-    for difficulty in ["easy", "medium", "hard"]:
-        print(f"--- {difficulty.upper()} ---")
-        task_rewards = []
-
-        for ep in range(EPISODES_PER_TASK):
-            seed = 100 + ep  # Deterministic seeds for reproducibility
-            result = run_episode(client, env, difficulty, seed)
-            all_results.append(result)
-            task_rewards.append(result["reward"])
-
-            print(f"[STEP] {difficulty} episode {ep+1}")
-            print(
-                f"  Episode {ep+1}: "
-                f"product={result['product']}, "
-                f"baseline={result['baseline']:.0f}, "
-                f"predicted={result['predicted']:.0f}, "
-                f"expected={result['expected']:.0f}, "
-                f"reward={result['reward']:.4f} "
-                f"(dir={result['direction_score']:.1f}, "
-                f"mag={result['magnitude_score']:.1f}, "
-                f"cov={result['coverage_score']:.2f})"
-            )
-
-        avg_reward = sum(task_rewards) / len(task_rewards)
-        print(f"  Average reward ({difficulty}): {avg_reward:.4f}")
-        print(f"[TASK] task={difficulty} score={avg_reward:.4f}")
-        print()
-
-    # Summary
-    print("=" * 60)
-    print("SUMMARY")
-    print("=" * 60)
-    for difficulty in ["easy", "medium", "hard"]:
-        task_results = [r for r in all_results if r["difficulty"] == difficulty]
-        avg = sum(r["reward"] for r in task_results) / len(task_results)
-        print(f"  {difficulty:6s}: avg_reward = {avg:.4f}")
-
-    overall_avg = sum(r["reward"] for r in all_results) / len(all_results)
-    print("[END]")
-    print(f"  {'OVERALL':6s}: avg_reward = {overall_avg:.4f}")
-    print()
+    # Print summary
+    print("\n" + "=" * 60, flush=True)
+    print("SUMMARY", flush=True)
+    print("=" * 60, flush=True)
+    for r in results:
+        print(f"  {r['task_id']:12s}: score={r['score']:.3f} success={r['success']}", flush=True)
+    overall = sum(r["score"] for r in results) / len(results)
+    print(f"  {'OVERALL':12s}: score={overall:.3f}", flush=True)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

@@ -7,11 +7,11 @@ port: 8000
 
 tasks:
   - name: easy
-    description: Single signal forecast adjustment
+    description: "Single signal forecast adjustment"
     difficulty: easy
   - name: medium
-    description: Multi-signal same-direction forecast adjustment
+    description: "Multi-signal same-direction forecast adjustment"
     difficulty: medium
   - name: hard
-    description: Conflicting multi-signal forecast adjustment
+    description: "Conflicting multi-signal forecast adjustment"
     difficulty: hard
