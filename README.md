@@ -16,7 +16,7 @@ An OpenEnv environment that trains AI agents to adjust statistical demand foreca
 
 ## Why This Matters
 
-Demand forecasting drives billions in inventory, production, and supply chain decisions globally. Statistical models produce a baseline forecast, but real-world factors — festive seasons, promotions, competitor activity, economic shifts — require human analysts to make contextual adjustments. This is exactly what demand planners at companies like Unilever, P&G, and Nestle do every planning cycle.
+Demand forecasting drives billions in inventory, production, and supply chain decisions globally. Statistical models produce a baseline forecast, but real-world factors — festive seasons, promotions, competitor activity, economic shifts — require human analysts to make contextual adjustments. This is exactly what demand planners at leading FMCG companies do every planning cycle.
 
 This environment teaches LLMs to perform that adjustment task, bridging the gap between statistical forecasting and human judgment.
 
